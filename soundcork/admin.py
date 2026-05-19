@@ -80,7 +80,6 @@ def get_admin_router(datastore: DataStore, speakers: Speakers):
 
                 found_account.devices.append(dev)
             else:
-                logger.info(f"unassociated device {dev.id}")
                 unassociated_devices.append(dev)
                 client = SoundTouchClient(dev.st_device)
                 try:
@@ -171,14 +170,14 @@ def get_admin_router(datastore: DataStore, speakers: Speakers):
 
     @router.post("/admin/addDevice/{device_id}")
     async def add_device_to_soundcork(device_id: str):
-        logger.info(f"add device {device_id} to soundcork")
+        logger.debug(f"add device {device_id} to soundcork")
         combined_device = speakers.all_devices().get(device_id)
         if combined_device:
             st_device = combined_device.st_device
             if st_device:
                 hostname = st_device.Host
                 success = add_device_by_ip(hostname, combined_device.reachable)
-                logger.info(f"added account from {hostname} success = {success}")
+                logger.debug(f"added account from {hostname} success = {success}")
 
         return RedirectResponse(url=f"/admin/", status_code=HTTPStatus.FOUND)
 
@@ -209,28 +208,27 @@ def get_admin_router(datastore: DataStore, speakers: Speakers):
         request: Request, device_id: str, account_id: Annotated[str, Form()]
     ):
         success = speakers.set_account(device_id, account_id)
-        logger.info(f"success={success}")
         return RedirectResponse(url="/admin/", status_code=HTTPStatus.FOUND)
+
+    @router.get("/admin/edit_device/{device_id}")
+    def edit_device_form(request: Request, device_id: str):
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/edit_device.html",
+            context={"device_id": device_id},
+        )
 
     @router.post("/admin/{device_id}/setName")
     async def set_name(
         device_id: str, name: Annotated[str, Form()], background_tasks: BackgroundTasks
     ):
-        logger.info(f"creating background task to set name to {name}")
         background_tasks.add_task(speakers.set_name, device_id, name)
-        logger.info("done creating task to set name")
 
         return RedirectResponse(url="/admin/", status_code=HTTPStatus.FOUND)
 
     @router.post("/admin/{device_id}/setLanguage")
     async def set_language(device_id: str, language: Annotated[str, Form()]):
         await speakers.set_language(device_id, language)
-
-        return RedirectResponse(url="/admin/", status_code=HTTPStatus.FOUND)
-
-    @router.post("/admin/{device_id}")
-    async def telnet_add_account_unrooted(request: Request, device_id: str):
-        logger.info("")
 
         return RedirectResponse(url="/admin/", status_code=HTTPStatus.FOUND)
 
