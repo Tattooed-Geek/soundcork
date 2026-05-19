@@ -4,7 +4,7 @@ Endpoints for an admin UI.
 """
 
 import logging
-from datetime import datetime, timezone
+import time
 from http import HTTPStatus
 from typing import Annotated
 
@@ -16,12 +16,14 @@ from bosesoundtouchapi.soundtouchclient import (  # type: ignore
 from bosesoundtouchapi.soundtouchdiscovery import SoundTouchDiscovery  # type: ignore
 from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from soundcork.constants import ACCOUNT_RE
 from soundcork.datastore import DataStore
 from soundcork.devices import (
     add_device_by_ip,
     addr_is_reachable,
+    default_sources,
     override_speaker_config,
     override_speaker_config_non_rooted,
     reboot_speaker,
@@ -81,22 +83,31 @@ def get_admin_router(datastore: DataStore, speakers: Speakers):
                 logger.info(f"unassociated device {dev.id}")
                 unassociated_devices.append(dev)
                 client = SoundTouchClient(dev.st_device)
-                lang = client.GetLanguage()
-                lang_code = lang.Value
-                logger.info(f"language={lang_code}")
-                dev.language_code = lang_code
+                try:
+                    # sometimes a newly loaded device doesn't have its lang set yet
+                    lang = client.GetLanguage()
+                    lang_code = lang.Value
+                    dev.language_code = lang_code
+                except:
+                    dev.language_code = "0"
 
             # also check to see if it's available via ssh
             dev.reachable = addr_is_reachable(dev.ip)
 
         return templates.TemplateResponse(
             request=request,
-            name="admin/index.html",
+            name="admin/admin_main.html",
             context={
                 "accounts": accounts,
                 "unassociated": unassociated_devices,
                 "language_codes": LanguageCodes,
             },
+        )
+
+    @router.get("/admin/create_account")
+    def create_acccount_form(request: Request):
+        return templates.TemplateResponse(
+            request=request, name="admin/create_account.html"
         )
 
     @router.post("/admin/switchToSoundcork/{device_id}")
@@ -107,14 +118,19 @@ def get_admin_router(datastore: DataStore, speakers: Speakers):
             st_device = combined_device.st_device
             if st_device:
                 hostname = st_device.Host
-                success = await override_speaker_config_non_rooted(hostname)
-                logger.info(
-                    f"override speaker config on {hostname} success = {success}"
-                )
-                # reboot = reboot_speaker(hostname)
-                # logger.info(f"reboot {hostname} result {reboot}")
-                # speakers.clear_device(device_id)
-                return RedirectResponse("/admin", status_code=HTTPStatus.FOUND)
+                if combined_device.reachable:
+                    success = override_speaker_config(hostname)
+                    reboot = reboot_speaker(hostname)
+                    logger.info(f"reboot {hostname} result {reboot}")
+                    speakers.clear_device(device_id)
+                else:
+                    success = await override_speaker_config_non_rooted(hostname)
+                    logger.info(
+                        f"override speaker config on {hostname} success = {success}"
+                    )
+                    speakers.clear_device(device_id)
+        # wait a little for the speaker to restart
+        time.sleep(10)
         return RedirectResponse(
             url=f"/admin/wait/{device_id}/0", status_code=HTTPStatus.FOUND
         )
@@ -126,11 +142,26 @@ def get_admin_router(datastore: DataStore, speakers: Speakers):
         if elapsed >= 120:
             return RedirectResponse(url=f"/admin/", status_code=HTTPStatus.FOUND)
 
+        if elapsed == 0:
+            # for the first request wait 40 seconds
+            time.sleep(40)
+            elapsed = 40
+
         combined_device = speakers.all_devices().get(device_id)
         if combined_device:
             st_device = combined_device.st_device
             if st_device:
-                return RedirectResponse(url=f"/admin/", status_code=HTTPStatus.FOUND)
+                try:
+                    # a freshly rebooted device might not have its lang available yet.
+                    # in this case give it a little longer to load
+                    client = SoundTouchClient(st_device)
+                    lang = client.GetLanguage()
+                    # if it's loadable then return to the admin page
+                    return RedirectResponse(
+                        url=f"/admin/", status_code=HTTPStatus.FOUND
+                    )
+                except:
+                    pass
 
         return templates.TemplateResponse(
             request=request,
@@ -146,68 +177,30 @@ def get_admin_router(datastore: DataStore, speakers: Speakers):
             st_device = combined_device.st_device
             if st_device:
                 hostname = st_device.Host
-                success = add_device_by_ip(hostname)
+                success = add_device_by_ip(hostname, combined_device.reachable)
                 logger.info(f"added account from {hostname} success = {success}")
 
         return RedirectResponse(url=f"/admin/", status_code=HTTPStatus.FOUND)
 
+    class AccountForm(BaseModel):
+        account_id: str = Field(pattern=ACCOUNT_RE)
+        account_name: str
+
     @router.post("/admin/addAccount")
-    async def add_account(
-        account_id: Annotated[str, Form()], account_name: Annotated[str, Form()]
-    ):
-        logger.info(f"adding new account '{account_name}' with id {account_id}")
-        now = datetime.fromtimestamp(
-            datetime.now().timestamp(), timezone.utc
-        ).isoformat(timespec="milliseconds")
-        success = datastore.create_account(account_id, account_name)
+    async def add_account(form: Annotated[AccountForm, Form()]):
+
+        logger.info(
+            f"adding new account '{form.account_name}' with id {form.account_id}"
+        )
+
+        success = datastore.create_account(form.account_id, form.account_name)
         logger.info(f"created account success={success}")
         datastore.save_configured_sources(
-            account_id,
-            [
-                ConfiguredSource(
-                    display_name="AUX IN",
-                    id="112345",
-                    secret="",
-                    secret_type="",
-                    source_key_type="AUX",
-                    source_key_account="AUX",
-                    created_on=now,
-                    updated_on=now,
-                ),
-                ConfiguredSource(
-                    display_name="INTERNET RADIO",
-                    id="112346",
-                    secret="",
-                    secret_type="token",
-                    source_key_type="INTERNET_RADIO",
-                    source_key_account="",
-                    created_on=now,
-                    updated_on=now,
-                ),
-                ConfiguredSource(
-                    display_name="LOCAL_INTERNET RADIO",
-                    id="112347",
-                    secret="",
-                    secret_type="token",
-                    source_key_type="LOCAL_INTERNET_RADIO",
-                    source_key_account="",
-                    created_on=now,
-                    updated_on=now,
-                ),
-                ConfiguredSource(
-                    display_name="",
-                    id="112348",
-                    secret="",
-                    secret_type="token",
-                    source_key_type="TUNEIN",
-                    source_key_account="",
-                    created_on=now,
-                    updated_on=now,
-                ),
-            ],
+            form.account_id,
+            default_sources(),
         )
-        datastore.save_presets(account_id, "", [])
-        datastore.save_recents(account_id, "", [])
+        datastore.save_presets(form.account_id, "", [])
+        datastore.save_recents(form.account_id, "", [])
 
         return RedirectResponse(url="/admin/", status_code=HTTPStatus.FOUND)
 
