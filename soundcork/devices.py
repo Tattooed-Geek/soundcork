@@ -96,6 +96,9 @@ async def override_speaker_config_non_rooted(host: str) -> bool:
     if isinstance(reader, TelnetReaderUnicode) and isinstance(
         writer, TelnetWriterUnicode
     ):
+        # the telnet reader can read up to a certain number of characters
+        # or until EOF, but in order to say "fill this buffer or return after
+        # a timeout" you have to wrap it with asyncio.wait_for
         data = await asyncio.wait_for(reader.read(4096), timeout=2)
         writer.write(
             f"sys configuration bmxRegistryUrl {settings.base_url}/bmx/registry/v1/services\r\n"
@@ -113,6 +116,7 @@ async def override_speaker_config_non_rooted(host: str) -> bool:
             f"envswitch boseurls set {settings.base_url}/marge {settings.base_url}/updates/soundtouch\r\n"
         )
         data = await asyncio.wait_for(reader.read(4096), timeout=2)
+        # this isn't actually necessary but good to have in the logs
         writer.write("getpdo CurrentSystemConfiguration\r\n")
         reply = await asyncio.wait_for(reader.read(4096), timeout=2)
         logger.info(f"pdo for device: {reply}")
@@ -287,6 +291,8 @@ def add_account(
 
 
 def default_sources() -> list[ConfiguredSource]:
+    # this is a basic set of sources that all can be
+    # used without a configured account
     now = datetime.fromtimestamp(datetime.now().timestamp(), timezone.utc).isoformat(
         timespec="milliseconds"
     )
