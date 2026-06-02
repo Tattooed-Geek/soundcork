@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response as StarletteResponse
 
 from soundcork.admin import get_admin_router
+from soundcork.api_v1 import get_api_v1_router
 from soundcork.bmx import (
     bmx_services_json,
     play_custom_stream,
@@ -58,15 +59,8 @@ from soundcork.marge import (
     update_device_poweron,
     update_preset,
 )
-from soundcork.miniapp import get_miniapp_router
-from soundcork.model import (
-    BmxNavResponse,
-    BmxPlaybackResponse,
-    BmxPodcastInfoResponse,
-    BmxResponse,
-    BoseXMLResponse,
-    Service,
-)
+from soundcork.model import BoseXMLResponse
+from soundcork.spotify_service import SpotifyService
 from soundcork.ui.speakers import Speakers
 from soundcork.unhandled_exception_handler import NotFoundHandler
 from soundcork.utils import strip_element_text
@@ -80,8 +74,6 @@ logger = logging.getLogger(__name__)
 datastore = DataStore()
 settings = Settings()
 speakers = Speakers(datastore, settings)
-
-from soundcork.spotify_service import SpotifyService
 
 spotify_service = SpotifyService()
 
@@ -137,19 +129,8 @@ startup_timestamp = int(datetime.now().timestamp() * 1000)
 
 @app.get("/")
 def read_root():
-    # kept for posterity
-    # return {"Bose": "Can't Brick Us"}
-
-    # if there are speakers that need to be configured default to admin
-    all_configured = True
-    for speaker in speakers.all_devices().values():
-        if not speaker.in_soundcork:
-            all_configured = False
-            break
-    if all_configured:
-        return RedirectResponse(url="/miniapp", status_code=303)
-    else:
-        return RedirectResponse(url="/admin", status_code=303)
+    """Redirect root to the new admin SPA."""
+    return RedirectResponse(url="/admin/", status_code=303)
 
 
 @app.post(
@@ -893,17 +874,18 @@ def add_device_to_datastore(device_id: str):
             return {device_id: success}
 
 
-#####################################################################################
+# include API v1 router
+app.include_router(get_api_v1_router(datastore, speakers))
+
 # include all routines for groups
 app.include_router(get_groups_router(datastore))
 app.include_router(get_groups_service_router(datastore))
 
+# include management router
+app.include_router(management_router)
 
-#  include admin router
-app.include_router(get_admin_router(datastore, speakers))
-
-#  include miniapp router
-app.include_router(get_miniapp_router(datastore, speakers))
+# serve static admin SPA
+app.mount("/admin", StaticFiles(directory="static/admin", html=True), name="admin-spa")
 
 # 404 handling
 handler = NotFoundHandler(settings.unhandled_log_dir)

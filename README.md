@@ -130,16 +130,26 @@ Once a soundcork server is running, the next step is to configure your SoundTouc
 
 ### Configuring speakers using the soundcork UI
 
-The easiest way to configure speakers is through the soundcork UI.  Navigate to your soundcork server at (in this example) `http://soundcork.local.example.com:8000/admin`. You should see a screen like
-![Screenshot of the soundcork admin UI.  A single account is listed with four speakers. ](./docs/images/soundcork-admin.png  "Soundcork UI")
+The easiest way to configure speakers is through the new modern SoundCork Admin UI. Navigate to your soundcork server at (in this example) `http://soundcork.local.example.com:8000/admin`. You should see a sleek, dark-themed interface with all controls in one place.
 
-This will list all the speakers found on your local network. The "Marge" listing shows whether the speaker is currently configured to run against the main "Bose" server or are configured to run against your soundcork instance. "In Soundcork" shows if soundcork has the configuration for the speaker or not. "Reachable" indicates if the `remote_services` file has been properly read and the speaker can be accessed for update.
+**Features of the new Admin UI:**
+- **Dashboard** — Overview of all devices, accounts, and system status
+- **Devices** — Grid view with real-time status, quick actions (power, reboot, configure, switch to SoundCork)
+- **Device Detail** — Now playing info, volume control, playback controls, firmware details
+- **Accounts** — Create and manage accounts with presets, sources, recents, and groups
+- **Presets** — Visual grid of all presets per account
+- **Sources** — Manage configured audio sources (AUX, TuneIn, etc.)
+- **Groups** — Create and manage stereo pairs (for SoundTouch 10 devices)
+- **Spotify** — Link Spotify accounts for Spotify Connect
+- **System Settings** — Network scan, server info
 
-Under "Action" there are three possible actions available: 
+The "Marge" column shows whether the speaker is configured to run against the main "Bose" server or your SoundCork instance. "In SoundCork" shows if SoundCork has the configuration. "Reachable" indicates if the `remote_services` file has been properly read and the speaker can be accessed for updates.
 
-- "Configure Account" is run first and both creates the associated account in soundcork and also adds the speaker configuration to soundcork. This action requires that the speaker be Reachable.
-- "Add to Soundcork" may be used to add the speaker configuration to soundcork once the account has been created. 
-- "Switch to Soundcork" actually configures the speaker to run using the soundcork server and then reboots the speaker. The UI will wait until the speaker has rebooted (a little over a minute usually) and then return to the admin screen. This action requires that the speaker be Reachable.
+Available actions per device:
+- **Configure** — Creates the associated account in SoundCork and adds the speaker configuration (requires Reachable)
+- **Switch to SoundCork** — Configures the speaker to use SoundCork and reboots it (requires Reachable)
+- **Details** — Opens the device detail page with playback controls and info
+- **Toggle Power / Reboot** — Direct device control
 
 
 ### Manual configuration of speakers
