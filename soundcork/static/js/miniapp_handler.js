@@ -5,15 +5,15 @@ export class MiniAppHandler extends SoundTouchHandler {
         console.log("connected!")
     }
     updateNowPlaying(speakerId, track, artist, album, imageUrl, status) {
-        $("#" + speakerId + "-info").find("div.np-info").html(track + " - " + artist)
+        $("#" + speakerId + "-info").find("div.np-info").text(track + " - " + artist)
         const sidebarDiv = $("#sidebar-" + speakerId)
         if (sidebarDiv.length > 0) {
-            sidebarDiv.find("span.now_playing").html(track)
+            sidebarDiv.find("span.now_playing").text(track)
             sidebarDiv.find("img").attr("src", imageUrl)
         }
     }
     updateVolume(speakerId, actualVolume, targetVolume) {
-        $("#" + speakerId + "-info").find("div.volume").html("Volume: " + actualVolume)
+        $("#" + speakerId + "-info").find("div.volume").text("Volume: " + actualVolume)
         const sidebarDiv = $("#sidebar-" + speakerId)
         if (sidebarDiv.length > 0) {
             console.log("in sidebar")
