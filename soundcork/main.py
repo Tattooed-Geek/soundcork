@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -775,6 +776,23 @@ def bmx_tunein_report(request: Request) -> None:
 def custom_stream_playback(request: Request) -> BmxPlaybackResponse:
     data = request.query_params.get("data", "")
     return play_custom_stream(data)
+
+
+@app.get("/core02/svc-bmx-adapter-orion/prod/orion/{data:path}", tags=["bmx"])
+def custom_stream_playback_path(data: str) -> BmxPlaybackResponse:
+    """Custom Station playback with base64url stream URL in the path.
+
+    The speaker requests this URL shape for LOCAL_INTERNET_RADIO presets
+    (was a runtime patch on the upstream Docker image — ported to source).
+    """
+    padding_needed = 4 - len(data) % 4
+    if padding_needed != 4:
+        data += "=" * padding_needed
+    decoded_url = base64.urlsafe_b64decode(data).decode()
+    json_obj = {"streamUrl": decoded_url, "imageUrl": "", "name": "Custom Station"}
+    json_str = json.dumps(json_obj)
+    encoded = base64.urlsafe_b64encode(json_str.encode()).decode()
+    return play_custom_stream(encoded)
 
 
 @app.get("/media/{filename}", tags=["bmx"])
