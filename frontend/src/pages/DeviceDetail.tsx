@@ -1,8 +1,10 @@
-import { useParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
 import { useDeviceDetail } from '../hooks/useDevices'
-import { useNowPlaying, useVolume, useSendCommand } from '../hooks/useCommand'
-import { Speaker, Play, Square, Volume2 } from 'lucide-react'
-import { useState } from 'react'
+import { useNowPlaying, useVolume, useSendCommand, useSendKey } from '../hooks/useCommand'
+import { Speaker, Play, Pause, Square, Volume2, VolumeX, Power, Disc3 } from 'lucide-react'
+
+const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n))
 
 export default function DeviceDetail() {
   const { id } = useParams()
@@ -10,7 +12,26 @@ export default function DeviceDetail() {
   const { data: np } = useNowPlaying(id)
   const { data: vol } = useVolume(id)
   const sendCmd = useSendCommand(id)
-  const [volInput, setVolInput] = useState(vol?.volume || 50)
+  const sendKey = useSendKey(id)
+
+  // Volume local optimiste : évite le « saut » du slider pendant le rafraîchissement
+  const [localVol, setLocalVol] = useState<number | null>(null)
+  const lastSend = useRef(0)
+  const debounce = useRef<number | undefined>(undefined)
+  const changeVol = (v: number) => {
+    setLocalVol(v)
+    window.clearTimeout(debounce.current)
+    debounce.current = window.setTimeout(() => {
+      lastSend.current = Date.now()
+      sendCmd.mutate({ action: 'volume', value: String(v) })
+    }, 350)
+  }
+  useEffect(() => {
+    if (vol?.volume != null && Date.now() - lastSend.current > 2500) setLocalVol(vol.volume)
+  }, [vol?.volume])
+
+  const volVal = clamp(localVol ?? vol?.volume ?? 0, 0, 100)
+  const playing = np?.play_state === 'PLAY_STATE'
 
   if (!device) {
     return <div className="text-dark-400">Loading device...</div>
@@ -19,13 +40,21 @@ export default function DeviceDetail() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <div className="w-16 h-16 rounded-xl bg-dark-700 flex items-center justify-center">
+        <div className="w-16 h-16 rounded-xl bg-dark-700 border border-dark-600 flex items-center justify-center">
           <Speaker size={32} className="text-accent" />
         </div>
         <div>
           <h1 className="text-2xl font-bold text-dark-100">{device.name || device.id}</h1>
           <div className="text-sm text-dark-400">{device.product_code || 'Unknown model'} • {device.ip}</div>
         </div>
+        <Link
+          to={`/player?device=${device.id}`}
+          title="Open the music player for this device"
+          className="ml-auto flex items-center gap-2 px-4 py-2.5 rounded-lg bg-gold-gradient text-[#1a1206] hover:shadow-gold-glow shadow-gold-glow-sm transition"
+        >
+          <Disc3 size={16} />
+          Open Player
+        </Link>
       </div>
 
       {/* Now Playing Card */}
@@ -50,22 +79,39 @@ export default function DeviceDetail() {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => sendCmd.mutate({ action: 'play', value: '' })}
-            className="p-3 rounded-full bg-dark-700 hover:bg-dark-600 transition"
+            onClick={() => sendKey.mutate('PLAY_PAUSE')}
+            title={playing ? 'Pause' : 'Play / resume'}
+            className="p-3 rounded-full bg-gold-gradient text-[#1a1206] hover:shadow-gold-glow shadow-gold-glow-sm transition"
           >
-            <Play size={18} className="text-dark-100" />
+            {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="ml-0.5" />}
           </button>
           <button
             onClick={() => sendCmd.mutate({ action: 'stop', value: '' })}
-            className="p-3 rounded-full bg-dark-700 hover:bg-dark-600 transition"
+            title="Stop playback"
+            className="p-3 rounded-full bg-dark-700 border border-dark-600 hover:bg-dark-600 transition"
           >
-            <Square size={18} className="text-dark-100" />
+            <Square size={16} className="text-dark-100" fill="currentColor" />
+          </button>
+          <button
+            onClick={() => sendKey.mutate('MUTE')}
+            title={vol?.muted ? 'Unmute' : 'Mute'}
+            className={`p-3 rounded-full border transition ${
+              vol?.muted
+                ? 'bg-accent-dim/30 border-accent text-accent-bright'
+                : 'bg-dark-700 border-dark-600 hover:bg-dark-600 text-dark-300'
+            }`}
+          >
+            {vol?.muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
           </button>
           <button
             onClick={() => sendCmd.mutate({ action: 'power', value: '' })}
-            className="px-4 py-2 rounded-md bg-dark-700 hover:bg-dark-600 transition text-sm text-dark-100 ml-auto"
+            title="Toggle power"
+            className="px-4 py-2 rounded-md bg-dark-700 border border-dark-600 hover:bg-red-950/40 hover:border-red-800 transition text-sm text-dark-200 ml-auto"
           >
-            Toggle Power
+            <span className="flex items-center gap-1.5">
+              <Power size={14} />
+              Toggle Power
+            </span>
           </button>
         </div>
       </div>
@@ -74,7 +120,9 @@ export default function DeviceDetail() {
       <div className="bg-dark-800 border border-dark-600 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-dark-100">Volume</h2>
-          <div className="text-sm text-dark-300">{vol?.volume || 0}%{vol?.muted && <span className="ml-2 text-red-400">Muted</span>}</div>
+          <div className="text-sm text-dark-300 tabular-nums">
+            {volVal}%{vol?.muted && <span className="ml-2 text-accent">Muted</span>}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Volume2 size={18} className="text-dark-400" />
@@ -82,13 +130,11 @@ export default function DeviceDetail() {
             type="range"
             min={0}
             max={100}
-            value={vol?.volume || 0}
-            onChange={(e) => {
-              const v = parseInt(e.target.value)
-              setVolInput(v)
-            }}
-            onMouseUp={() => sendCmd.mutate({ action: 'volume', value: String(volInput) })}
-            className="flex-1 accent-accent"
+            value={volVal}
+            onChange={(e) => changeVol(parseInt(e.target.value))}
+            className="flex-1"
+            style={{ '--fill': `${volVal}%` } as React.CSSProperties}
+            title="Drag to set the device volume"
           />
         </div>
       </div>
@@ -100,7 +146,7 @@ export default function DeviceDetail() {
           <div className="text-dark-400">ID</div>
           <div className="text-dark-300 font-mono">{device.id}</div>
 
-          <div className="text-dark-400">Firmvare</div>
+          <div className="text-dark-400">Firmware</div>
           <div className="text-dark-300">{device.firmware_version || '—'}</div>
 
           <div className="text-dark-400">Marge Server</div>

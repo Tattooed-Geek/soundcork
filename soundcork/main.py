@@ -59,7 +59,14 @@ from soundcork.marge import (
     update_device_poweron,
     update_preset,
 )
-from soundcork.model import BmxResponse, BoseXMLResponse
+from soundcork.model import (
+    BmxNavResponse,
+    BmxPlaybackResponse,
+    BmxPodcastInfoResponse,
+    BmxResponse,
+    BoseXMLResponse,
+    Service,
+)
 from soundcork.spotify_service import SpotifyService
 from soundcork.ui.speakers import Speakers
 from soundcork.unhandled_exception_handler import NotFoundHandler
@@ -120,8 +127,6 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-app.include_router(management_router)
 
 
 startup_timestamp = int(datetime.now().timestamp() * 1000)

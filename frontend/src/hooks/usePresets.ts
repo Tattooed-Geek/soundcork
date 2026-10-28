@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import apiClient from '../api/client'
 
 export interface Preset {
@@ -7,36 +7,42 @@ export interface Preset {
   source: string
   type: string
   location: string
-  container_art: string | null
+  container_art: string
+  source_account?: string
+  source_id?: string | null
+  is_presetable?: string | null
+  account?: string
 }
 
-export function usePresets(accountId: string | undefined) {
+export function usePresets(accountId?: string) {
   return useQuery({
     queryKey: ['presets', accountId],
     queryFn: async () => {
-      const res = await apiClient.get<Preset[]>(`/accounts/${accountId}/presets`)
-      return res.data
+      if (!accountId) return [] as Preset[]
+      const res = await apiClient.get(`/accounts/${accountId}/presets`)
+      return res.data as Preset[]
     },
     enabled: !!accountId,
   })
 }
 
-export function useUpdatePreset(accountId: string | undefined) {
+export function useUpdatePreset(accountId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (preset: Preset) => {
-      const res = await apiClient.put<Preset>(`/accounts/${accountId}/presets/${preset.id}`, preset)
+    mutationFn: async (p: Preset) => {
+      const res = await apiClient.put(`/accounts/${accountId}/presets/${p.id}`, p)
       return res.data
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['presets', accountId] }),
   })
 }
 
-export function useDeletePreset(accountId: string | undefined) {
+export function useDeletePreset(accountId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (presetId: string) => {
-      await apiClient.delete(`/accounts/${accountId}/presets/${presetId}`)
+      const res = await apiClient.delete(`/accounts/${accountId}/presets/${presetId}`)
+      return res.data
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['presets', accountId] }),
   })

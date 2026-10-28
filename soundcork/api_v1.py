@@ -198,8 +198,8 @@ def get_api_v1_router(datastore: DataStore, speakers: Speakers) -> APIRouter:
                 station=getattr(info, "StationName", None),
                 duration=getattr(info, "Duration", None),
                 position=getattr(info, "Position", None),
-                play_state=getattr(info, "PlayState", None),
-                volume=getattr(vol, "Level", None),
+                play_state=getattr(info, "PlayStatus", None),
+                volume=getattr(vol, "Actual", None),
                 muted=getattr(vol, "IsMuted", None),
             )
         except Exception as e:
@@ -214,7 +214,7 @@ def get_api_v1_router(datastore: DataStore, speakers: Speakers) -> APIRouter:
         try:
             from bosesoundtouchapi.soundtouchclient import SoundTouchClient
             vol = SoundTouchClient(cd.st_device).GetVolume()
-            return {"volume": getattr(vol, "Level", 0), "muted": getattr(vol, "IsMuted", False)}
+            return {"volume": getattr(vol, "Actual", 0), "muted": getattr(vol, "IsMuted", False)}
         except Exception as e:
             logger.warning(f"get_volume failed for {device_id}: {e}")
             raise HTTPException(status_code=500, detail="Could not fetch volume")
@@ -292,6 +292,21 @@ def get_api_v1_router(datastore: DataStore, speakers: Speakers) -> APIRouter:
             speakers.clear_device(device_id)
             return {"success": ok, "action": action, "reboot": rb}
 
+        if action == "key_press":
+            if not cd.st_device:
+                raise HTTPException(status_code=400, detail="Device offline")
+            from bosesoundtouchapi.soundtouchclient import SoundTouchClient
+            key = (cmd.value or "").upper()
+            SoundTouchClient(cd.st_device).SendKeyPress(key)
+            return {"success": True, "action": action, "key": key}
+
+        if action == "pause":
+            if not cd.st_device:
+                raise HTTPException(status_code=400, detail="Device offline")
+            from bosesoundtouchapi.soundtouchclient import SoundTouchClient
+            SoundTouchClient(cd.st_device).SendKeyPress("PLAY_PAUSE")
+            return {"success": True, "action": action}
+
         if action == "configure_account":
             if not cd.st_device:
                 raise HTTPException(status_code=400, detail="Device offline")
@@ -313,8 +328,16 @@ def get_api_v1_router(datastore: DataStore, speakers: Speakers) -> APIRouter:
             raise HTTPException(status_code=404, detail="Device not found or offline")
         try:
             from bosesoundtouchapi.soundtouchclient import SoundTouchClient
-            bass = SoundTouchClient(cd.st_device).GetBass()
-            return {"level": getattr(bass, "ActualBass", None), "target": getattr(bass, "TargetBass", None)}
+            client = SoundTouchClient(cd.st_device)
+            bass = client.GetBass()
+            caps = client.GetBassCapabilities()
+            return {
+                "level": getattr(bass, "Actual", None),
+                "target": getattr(bass, "Target", None),
+                "min": getattr(caps, "Minimum", -9),
+                "max": getattr(caps, "Maximum", 0),
+                "available": bool(getattr(caps, "IsAvailable", True)),
+            }
         except Exception as e:
             logger.warning(f"get_bass failed for {device_id}: {e}")
             raise HTTPException(status_code=500, detail="Could not fetch bass")
@@ -634,6 +657,172 @@ def get_api_v1_router(datastore: DataStore, speakers: Speakers) -> APIRouter:
         callback_url = settings.base_url.rstrip("/") + "/mgmt/spotify/callback"
         authorize_url = spotify.build_authorize_url(redirect_uri=callback_url)
         return {"redirectUrl": authorize_url}
+
+    # -------------------------------------------------------------------
+    # Radio directory (Radio-Browser, ~50 000 stations — même source qu'EasyRadio)
+    # -------------------------------------------------------------------
+
+    @router.get("/radio/search")
+    async def radio_search(
+        q: str = "",
+        countrycode: str = "",
+        tag: str = "",
+        min_bitrate: int = 0,
+        codec: str = "",
+        region: str = "",
+        limit: int = 80,
+    ) -> list[dict[str, Any]]:
+        """Recherche filtrée dans l'annuaire Radio-Browser (~50 000 stations).
+
+        q >= 2 caractères : recherche par nom ; sinon : top mondial (découverte).
+        Filtres serveur : pays (code ISO), genre/tag, bitrate minimum, codec, région/ville.
+        """
+        import httpx
+        from urllib.parse import quote
+
+        query = q.strip()
+        if query and len(query) < 2:
+            raise HTTPException(422, "Requête trop courte (minimum 2 caractères).")
+        capped = max(1, min(limit, 150))
+        cc = countrycode.strip().upper()
+        tag_s = tag.strip()
+        codec_s = codec.strip()
+        region_s = region.strip()
+        min_br = max(0, int(min_bitrate))
+        has_filters = bool(query or cc or tag_s or min_br or codec_s or region_s)
+        capped_fetch = min(capped, 400)
+
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                if has_filters:
+                    # Recherche avancée : filtrage natif côté annuaire.
+                    p: dict[str, Any] = {
+                        "limit": capped_fetch,
+                        "order": "clickcount",
+                        "reverse": "true",
+                        "hidebroken": "true",
+                    }
+                    if query:
+                        p["name"] = query
+                    if cc:
+                        p["countrycode"] = cc
+                    if tag_s:
+                        p["tagList"] = tag_s
+                    if min_br:
+                        p["bitrateMin"] = str(min_br)
+                    if codec_s:
+                        p["codec"] = codec_s
+                    if region_s:
+                        p["state"] = region_s
+                    resp = await client.get(
+                        "https://all.api.radio-browser.info/json/stations/search",
+                        params=p,
+                        headers={"User-Agent": "SoundCork/1.0 (SoundTouch preset admin)"},
+                    )
+                else:
+                    # Aucun critère : top mondial (découverte).
+                    resp = await client.get(
+                        "https://all.api.radio-browser.info/json/stations/topclick/500",
+                        params={"limit": capped_fetch, "hidebroken": "true"},
+                        headers={"User-Agent": "SoundCork/1.0 (SoundTouch preset admin)"},
+                    )
+                resp.raise_for_status()
+                stations = resp.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("radio-browser search failed: %s", exc)
+            raise HTTPException(502, "Annuaire Radio-Browser injoignable, réessaie dans un instant.")
+
+        results: list[dict[str, Any]] = []
+        for s in stations:
+            url_stream = s.get("url_resolved") or s.get("url")
+            if not url_stream:
+                continue
+            # Le filtrage est fait nativement par l'annuaire ; seuls subsistent
+            # la validation du flux et la région sur nom en plus de l'état.
+            if region_s:
+                hay = f"{s.get('state') or ''} {s.get('name') or ''}".lower()
+                if region_s.lower() not in hay:
+                    continue
+            results.append(
+                {
+                    "uuid": s.get("stationuuid"),
+                    "name": (s.get("name") or "").strip() or "(sans nom)",
+                    "url": url_stream,
+                    "country": s.get("country") or "",
+                    "countrycode": s.get("countrycode") or "",
+                    "state": s.get("state") or "",
+                    "tags": [t.strip() for t in (s.get("tags") or "").split(",") if t.strip()][:4],
+                    "bitrate": s.get("bitrate") or 0,
+                    "codec": s.get("codec") or "",
+                    "votes": s.get("votes") or 0,
+                    "clickcount": s.get("clickcount") or 0,
+                }
+            )
+            if len(results) >= capped:
+                break
+        return results
+
+    _rb_countries_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+    _rb_tags_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+
+    @router.get("/radio/countries")
+    async def radio_countries() -> list[dict[str, Any]]:
+        """Liste des pays de l'annuaire (cache 24 h) pour le filtre de l'écran de recherche."""
+        import httpx
+
+        now = time.time()
+        if _rb_countries_cache["data"] is None or now - _rb_countries_cache["ts"] > 86400:
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.get(
+                        "https://all.api.radio-browser.info/json/countries",
+                        params={"limit": 300},
+                        headers={"User-Agent": "SoundCork/1.0 (SoundTouch preset admin)"},
+                    )
+                    resp.raise_for_status()
+                    raw = resp.json()
+                data = sorted(
+                    (
+                        {"name": c.get("name") or "", "code": c.get("iso_3166_1") or "", "count": c.get("stationcount") or 0}
+                        for c in raw
+                        if c.get("iso_3166_1")
+                    ),
+                    key=lambda c: -c["count"],
+                )
+                _rb_countries_cache.update(ts=now, data=data)
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.warning("radio-browser countries failed: %s", exc)
+                if _rb_countries_cache["data"] is None:
+                    raise HTTPException(502, "Annuaire Radio-Browser injoignable.")
+        return list(_rb_countries_cache["data"] or [])
+
+    @router.get("/radio/genres")
+    async def radio_genres() -> list[dict[str, Any]]:
+        """Top genres/tags de l'annuaire (cache 24 h) pour le filtre de l'écran de recherche."""
+        import httpx
+
+        now = time.time()
+        if _rb_tags_cache["data"] is None or now - _rb_tags_cache["ts"] > 86400:
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.get(
+                        "https://all.api.radio-browser.info/json/tags",
+                        params={"limit": 250, "order": "stationcount", "reverse": "true"},
+                        headers={"User-Agent": "SoundCork/1.0 (SoundTouch preset admin)"},
+                    )
+                    resp.raise_for_status()
+                    raw = resp.json()
+                data = [
+                    {"name": t.get("name") or "", "count": t.get("stationcount") or 0}
+                    for t in raw
+                    if t.get("name") and len(t.get("name")) <= 24
+                ][:80]
+                _rb_tags_cache.update(ts=now, data=data)
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.warning("radio-browser tags failed: %s", exc)
+                if _rb_tags_cache["data"] is None:
+                    raise HTTPException(502, "Annuaire Radio-Browser injoignable.")
+        return list(_rb_tags_cache["data"] or [])
 
     # -------------------------------------------------------------------
     # System

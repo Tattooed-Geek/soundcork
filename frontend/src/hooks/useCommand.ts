@@ -7,43 +7,89 @@ export interface CommandPayload {
   content_item_id?: string
 }
 
-export function useSendCommand(deviceId: string | undefined) {
+export interface NowPlayingData {
+  track?: string
+  artist?: string
+  album?: string
+  station?: string
+  art?: string
+  play_state?: string
+  source?: string
+}
+
+export interface VolumeData {
+  volume?: number
+  muted?: boolean
+  target?: string | null
+}
+
+export function useNowPlaying(deviceId?: string) {
+  return useQuery({
+    queryKey: ['nowplaying', deviceId],
+    queryFn: async () => {
+      const res = await apiClient.get(`/devices/${deviceId}/now-playing`)
+      return res.data as NowPlayingData
+    },
+    enabled: !!deviceId,
+    refetchInterval: 3000,
+  })
+}
+
+export function useVolume(deviceId?: string) {
+  return useQuery({
+    queryKey: ['volume', deviceId],
+    queryFn: async () => {
+      const res = await apiClient.get(`/devices/${deviceId}/volume`)
+      return res.data as VolumeData
+    },
+    enabled: !!deviceId,
+    refetchInterval: 4000,
+  })
+}
+
+export function useBass(deviceId?: string) {
+  return useQuery({
+    queryKey: ['bass', deviceId],
+    queryFn: async () => {
+      const res = await apiClient.get(`/devices/${deviceId}/bass`)
+      return res.data as { level?: number | null; target?: number | null; min?: number; max?: number; available?: boolean }
+    },
+    enabled: !!deviceId,
+    refetchInterval: 5000,
+    retry: false,
+  })
+}
+
+export function useSendCommand(deviceId?: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (payload: CommandPayload) => {
-      if (!deviceId) throw new Error('No device selected')
       const res = await apiClient.post(`/devices/${deviceId}/command`, payload)
       return res.data
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['devices'] })
-      qc.invalidateQueries({ queryKey: ['device', deviceId] })
+      qc.invalidateQueries({ queryKey: ['nowplaying', deviceId] })
+      qc.invalidateQueries({ queryKey: ['volume', deviceId] })
     },
   })
 }
 
-export function useNowPlaying(deviceId: string | undefined) {
-  return useQuery({
-    queryKey: ['now-playing', deviceId],
-    queryFn: async () => {
-      if (!deviceId) return null
-      const res = await apiClient.get(`/devices/${deviceId}/now-playing`)
+export function useSetBass(deviceId?: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (level: number) => {
+      const res = await apiClient.post(`/devices/${deviceId}/bass`, { level })
       return res.data
     },
-    enabled: !!deviceId,
-    refetchInterval: 3000,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bass', deviceId] }),
   })
 }
 
-export function useVolume(deviceId: string | undefined) {
-  return useQuery({
-    queryKey: ['volume', deviceId],
-    queryFn: async () => {
-      if (!deviceId) return { volume: 0, muted: false }
-      const res = await apiClient.get(`/devices/${deviceId}/volume`)
-      return res.data as { volume: number; muted: boolean }
+export function useSendKey(deviceId?: string) {
+  return useMutation({
+    mutationFn: async (key: string) => {
+      const res = await apiClient.post(`/devices/${deviceId}/key`, { key })
+      return res.data
     },
-    enabled: !!deviceId,
-    refetchInterval: 3000,
   })
 }

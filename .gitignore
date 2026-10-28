@@ -212,5 +212,6 @@ __marimo__/
 
 # Node
 node_modules/
-package.json
-package-lock.json
+
+# Local test data (real accounts/presets — never push
+test-data/
