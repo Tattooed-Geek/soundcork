@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # local directory where soundcork stores its data
     data_dir: str = ""
 
+    # server port (default 8000)
+    port: int = 8000
+
     # Spotify OAuth (optional — leave empty to disable)
     spotify_client_id: str = ""
     spotify_client_secret: str = ""

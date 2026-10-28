@@ -1,0 +1,226 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+#
+# startcork — Start SoundCork admin UI (Docker or Local)
+#
+# Usage:
+#   ./startcork docker [PORT]  # Build and run via Docker multi-stage (default 8000)
+#   ./startcork local [PORT]   # Build frontend + start Python backend (default 8000)
+#   ./startcork                # Defaults to docker on port 8000
+#
+
+###############################################################################
+# Config
+###############################################################################
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
+CONTAINER_NAME="soundcork"
+IMAGE_NAME="soundcork"
+VIRTUALENV_PATH="$PROJECT_ROOT/.venv"
+MODE="${1:-docker}"
+PORT="${2:-8000}"
+
+###############################################################################
+# Helpers
+###############################################################################
+
+_detect_os() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macos"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        echo "linux"
+    else
+        echo "unknown"
+    fi
+}
+
+_get_host_ip() {
+    local os
+    os=$(_detect_os)
+    if [[ "$os" == "macos" ]]; then
+        # Try common Wi-Fi/Ethernet interfaces
+        local ip=""
+        ip=$(ipconfig getifaddr en0 2>/dev/null || true)
+        [[ -z "$ip" ]] && ip=$(ipconfig getifaddr en1 2>/dev/null || true)
+        [[ -z "$ip" ]] && ip=$(ipconfig getifaddr en2 2>/dev/null || true)
+        # Fallback: find any non-loopback IPv4
+        [[ -z "$ip" ]] && ip=$(ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | head -1)
+        echo "$ip"
+    else
+        # Linux
+        local ip=""
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        [[ -z "$ip" ]] && ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+        [[ -z "$ip" ]] && ip=$(ip addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | head -1)
+        echo "$ip"
+    fi
+}
+
+_check_cmd() {
+    if ! command -v "$1" > /dev/null 2>&1; then
+        echo "ERROR: '$1' is required but not found."
+        exit 1
+    fi
+}
+
+###############################################################################
+# Docker mode
+###############################################################################
+
+cmd_docker() {
+    _check_cmd docker
+
+    local host_ip
+    host_ip=$(_get_host_ip)
+    if [[ -z "$host_ip" ]]; then
+        echo "WARNING: Could not detect host IP. Falling back to localhost."
+        host_ip="localhost"
+    fi
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  SoundCork — Docker Mode"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Host IP  : $host_ip"
+    echo "  Port     : $PORT"
+    echo "  Web UI   : http://$host_ip:$PORT/admin/"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Remove old container if exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        echo "Removing existing container '$CONTAINER_NAME'..."
+        docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true
+    fi
+
+    echo "Building Docker image ('$IMAGE_NAME')..."
+    docker build -t "$IMAGE_NAME" "$PROJECT_ROOT"
+
+    echo "Starting container..."
+    docker run -d \
+        --name "$CONTAINER_NAME" \
+        -p ${PORT}:${PORT} \
+        -v "$PROJECT_ROOT/data:/soundcork/data" \
+        -e base_url="http://${host_ip}:${PORT}" \
+        -e port="${PORT}" \
+        "$IMAGE_NAME"
+
+    echo ""
+    echo "Container '$CONTAINER_NAME' started."
+    echo "Logs: docker logs -f $CONTAINER_NAME"
+    echo "Stop: docker stop $CONTAINER_NAME"
+    echo "Open : http://$host_ip:$PORT/admin/"
+}
+
+###############################################################################
+# Local mode
+###############################################################################
+
+cmd_local() {
+    local host_ip
+    host_ip=$(_get_host_ip)
+    if [[ -z "$host_ip" ]]; then
+        echo "WARNING: Could not detect host IP. Falling back to localhost."
+        host_ip="localhost"
+    fi
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  SoundCork — Local Mode"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Host IP  : $host_ip"
+    echo "  Port     : $PORT"
+    echo "  Web UI   : http://$host_ip:$PORT/admin/"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # --- Frontend build ---
+    echo ""
+    echo "[1/3] Building frontend..."
+    cd "$PROJECT_ROOT/frontend"
+
+    if [ ! -f "package.json" ]; then
+        echo "ERROR: frontend/package.json not found. Are you in the correct directory?"
+        exit 1
+    fi
+
+    if [ ! -d "node_modules" ]; then
+        echo "Installing npm dependencies..."
+        _check_cmd npm
+        npm install
+    fi
+
+    npm run build
+
+    echo "Copying frontend build to soundcork/static/admin/ ..."
+    mkdir -p "$PROJECT_ROOT/soundcork/static/admin"
+    cp -R "$PROJECT_ROOT/frontend/dist/"* "$PROJECT_ROOT/soundcork/static/admin/"
+
+    # --- Backend setup ---
+    echo ""
+    echo "[2/3] Preparing Python environment..."
+    cd "$PROJECT_ROOT"
+
+    if [ ! -d "$VIRTUALENV_PATH" ]; then
+        echo "Virtualenv not found at $VIRTUALENV_PATH"
+        echo "Creating virtualenv..."
+        _check_cmd python3
+        python3 -m venv "$VIRTUALENV_PATH"
+    fi
+
+    # Activate virtualenv
+    source "$VIRTUALENV_PATH/bin/activate"
+
+    # Install requirements if missing
+    if ! python3 -c "import fastapi" 2> /dev/null; then
+        echo "Installing Python requirements..."
+        pip install -q -r "$PROJECT_ROOT/requirements.txt"
+    fi
+
+    # --- Launch ---
+    echo ""
+    echo "[3/3] Starting SoundCork backend..."
+    cd "$PROJECT_ROOT/soundcork"
+
+    # Ensure data dir exists
+    mkdir -p "$PROJECT_ROOT/data"
+
+    # Export dynamic base_url for the session
+    export base_url="http://${host_ip}:${PORT}"
+    export data_dir="$PROJECT_ROOT/data"
+    export PYTHONPATH="$PROJECT_ROOT"
+
+    echo ""
+    echo "Server starting on http://$host_ip:$PORT"
+    echo "Admin UI: http://$host_ip:$PORT/admin/"
+    echo ""
+    echo "Press Ctrl+C to stop"
+    echo ""
+
+    # Use fastapi dev for hot-reload or fastapi run for prod-like
+    exec python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT --reload
+}
+
+###############################################################################
+# Main
+###############################################################################
+
+case "$MODE" in
+    docker)
+        cmd_docker
+        ;;
+    local)
+        cmd_local
+        ;;
+    *)
+    echo "Usage: $0 {docker | local} [PORT]"
+    echo ""
+    echo "  docker [PORT]  Build and run via Docker (recommended) (default 8000)"
+    echo "  local  [PORT]  Build frontend and run Python backend directly (default 8000)"
+    echo ""
+    echo "Examples:"
+    echo "  $0 docker        → docker build -t soundcork + docker run (port 8000)"
+    echo "  $0 docker 8080   → docker build -t soundcork + docker run (port 8080)"
+    echo "  $0 local         → npm build + copy + fastapi run (port 8000)"
+    echo "  $0 local 5000    → npm build + copy + fastapi run (port 5000)"
+        exit 1
+        ;;
+esac

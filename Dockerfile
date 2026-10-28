@@ -29,7 +29,7 @@ WORKDIR /app/soundcork
 
 # Gunicorn with uvicorn workers, bind to all interfaces
 # Override log files to stdout/stderr for container logging
-CMD ["gunicorn", "-c", "gunicorn_conf.py", "--bind", "0.0.0.0:8000", \
+CMD ["gunicorn", "-c", "gunicorn_conf.py", \
      "--access-logfile", "-", "--error-logfile", "-", \
      "--workers", "2", \
      "main:app"]
