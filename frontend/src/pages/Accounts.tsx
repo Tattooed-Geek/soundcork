@@ -68,7 +68,7 @@ export default function Accounts() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Link to={`/admin/accounts/${acc.id}`} className="px-3 py-1.5 rounded-md bg-dark-700 text-dark-100 hover:bg-dark-600 transition text-sm flex items-center gap-1">
+              <Link to={`/accounts/${acc.id}`} className="px-3 py-1.5 rounded-md bg-dark-700 text-dark-100 hover:bg-dark-600 transition text-sm flex items-center gap-1">
                 Manage <ChevronRight size={14} />
               </Link>
               <button

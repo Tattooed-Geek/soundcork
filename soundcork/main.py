@@ -59,7 +59,7 @@ from soundcork.marge import (
     update_device_poweron,
     update_preset,
 )
-from soundcork.model import BoseXMLResponse
+from soundcork.model import BmxResponse, BoseXMLResponse
 from soundcork.spotify_service import SpotifyService
 from soundcork.ui.speakers import Speakers
 from soundcork.unhandled_exception_handler import NotFoundHandler
@@ -884,8 +884,19 @@ app.include_router(get_groups_service_router(datastore))
 # include management router
 app.include_router(management_router)
 
-# serve static admin SPA
-app.mount("/admin", StaticFiles(directory="static/admin", html=True), name="admin-spa")
+# serve static admin SPA — fallback to index.html for client-side routes
+from starlette.staticfiles import StaticFiles as _StaticFiles
+
+class SPAStaticFiles(_StaticFiles):
+    """Serve static files with SPA fallback to index.html."""
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException:
+            # File not found — serve index.html so React Router handles the path
+            return await super().get_response("index.html", scope)
+
+app.mount("/admin", SPAStaticFiles(directory="static/admin", html=True), name="admin-spa")
 
 # 404 handling
 handler = NotFoundHandler(settings.unhandled_log_dir)

@@ -21,7 +21,7 @@ export default function AccountDetail() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        <Link to="/admin/accounts" className="text-dark-400 hover:text-dark-100 transition">
+        <Link to="/accounts" className="text-dark-400 hover:text-dark-100 transition">
           <ArrowLeft size={20} />
         </Link>
         <h1 className="text-2xl font-bold text-dark-100">{account.label}</h1>
