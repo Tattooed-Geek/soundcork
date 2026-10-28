@@ -775,6 +775,9 @@ def bmx_tunein_report(request: Request) -> None:
 @app.get("/core02/svc-bmx-adapter-orion/prod/orion/station", tags=["bmx"])
 def custom_stream_playback(request: Request) -> BmxPlaybackResponse:
     data = request.query_params.get("data", "")
+    padding_needed = 4 - len(data) % 4
+    if padding_needed != 4:
+        data += "=" * padding_needed
     return play_custom_stream(data)
 
 
