@@ -142,6 +142,15 @@ class Speakers:
             else:
                 sc_device.marge_server = f"Unknown ({st_device.StreamingUrl})"
 
+        # Fallback: create SoundTouchDevice manually when network discovery fails (e.g. Docker)
+        for cd in combined_devices.values():
+            if cd.st_device is None and cd.ip:
+                try:
+                    cd.st_device = SoundTouchDevice(cd.ip)
+                    cd.online = True
+                except Exception:
+                    pass
+
         return combined_devices
 
     def _content_item_to_soundtouchclient(self, ci: ContentItem) -> BCContentItem:
